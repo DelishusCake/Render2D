@@ -6,24 +6,12 @@
 #include "core.h"
 #include "geom.h"
 
+#include "assets.h"
+#include "render.h"
+
 // Ensure we're using the discrete GPU on laptops
 __declspec(dllexport) DWORD NvOptimusEnablement = 0x01;
 __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x01; 
-
-// Called on every frame
-static void update_and_render(i32 width, i32 height, f64 delta)
-{
-	glDisable(GL_DEPTH_TEST);
-
-	glEnable(GL_BLEND);
-	glBlendEquation(GL_FUNC_ADD);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	glClearColor(0.2f, 0.2f, 0.2f, 1.f);
-
-	glViewport(0,0,width,height);
-	glClear(GL_COLOR_BUFFER_BIT);
-};
 
 static void glfwCallbackError(int error, const char *msg)
 {
@@ -65,7 +53,7 @@ int main(int argc, const char *argv[])
 					i32 width, height;
 					glfwGetFramebufferSize(window, &width, &height);
 
-					update_and_render(width, height, delta);
+					render(width, height);
 					glfwSwapBuffers(window);
 
 					frames ++;
