@@ -62,7 +62,7 @@ static void asset_free(asset_t *asset)
 	}
 };
 
-static asset_entry_t* asset_hash_lookup(asset_cache_t *cache, const char *file_name)
+static asset_entry_t* asset_hash_lookup(assets_t *assets, const char *file_name)
 {
 	assert (strlen(file_name) < ASSET_NAME_LEN);
 	
@@ -72,7 +72,7 @@ static asset_entry_t* asset_hash_lookup(asset_cache_t *cache, const char *file_n
 	u32 index = init_index;
 	do 
 	{
-		asset_entry_t *entry = (cache->hash_map + index);
+		asset_entry_t *entry = (assets->hash_map + index);
 		if (entry->asset)
 		{
 			if (strcmp(entry->name, file_name) == 0)
@@ -85,34 +85,34 @@ static asset_entry_t* asset_hash_lookup(asset_cache_t *cache, const char *file_n
 	return NULL;
 };
 
-asset_cache_t* asset_cache_alloc()
+assets_t* assets_alloc()
 {
-	asset_cache_t *cache = malloc(sizeof(asset_cache_t));
-	assert(cache != NULL);
-	memset(cache, 0, sizeof(asset_cache_t));
-	return cache;
+	assets_t *assets = malloc(sizeof(assets_t));
+	assert(assets != NULL);
+	memset(assets, 0, sizeof(assets_t));
+	return assets;
 };
-void asset_cache_free(asset_cache_t *cache)
+void assets_free(assets_t *assets)
 {
 	// Free the loaded assets
 	for (u32 i = 0; i < ASSET_HASH_LEN; i++)
 	{
-		asset_entry_t *entry = cache->hash_map + i;
+		asset_entry_t *entry = assets->hash_map + i;
 		if (entry->asset)
 		{
 			asset_t *asset = entry->asset;
 			asset_free(asset);
 		};
 	};
-	// Free the cache structure
-	free(cache);
+	// Free the assets structure
+	free(assets);
 };
 
-image_t* asset_cache_get_image(asset_cache_t *cache, const char *file_name)
+image_t* assets_get_image(assets_t *assets, const char *file_name)
 {
 	image_t *image = NULL;
 
-	asset_entry_t *entry = asset_hash_lookup(cache, file_name);
+	asset_entry_t *entry = asset_hash_lookup(assets, file_name);
 	if (entry != NULL)
 	{
 		if (!entry->asset)
@@ -133,7 +133,7 @@ image_t* asset_cache_get_image(asset_cache_t *cache, const char *file_name)
 	}
 	return image;
 }; 
-void asset_cache_release(asset_cache_t *cache, asset_t *asset)
+void assets_release(assets_t *assets, asset_t *asset)
 {
 	asset->ref_count --;
 	if (asset->ref_count == 0)

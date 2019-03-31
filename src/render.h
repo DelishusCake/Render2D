@@ -6,11 +6,12 @@
 #include "core.h"
 #include "geom.h"
 
+#include "draw.h"
 #include "assets.h"
 
 bool render_init();
 void render_free();
 
-void render(u32 width, u32 height);
+void render(u32 width, u32 height, const draw_list_t *draw_list);
 
 #endif

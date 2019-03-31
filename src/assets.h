@@ -51,13 +51,13 @@ typedef struct
 {
 	// Hash map for asset lookup
 	asset_entry_t hash_map[ASSET_HASH_LEN];
-} asset_cache_t;
+} assets_t;
 
 // Creates/destroys the asset cache
-asset_cache_t* asset_cache_alloc();
-void           asset_cache_free(asset_cache_t *cache);
+assets_t* assets_alloc();
+void      assets_free(assets_t *assets);
 
-image_t* asset_cache_get_image(asset_cache_t *cache, const char *file_name); 
-void     asset_cache_release(asset_cache_t *cache, asset_t *asset);
+image_t*  assets_get_image(assets_t *assets, const char *file_name); 
+void      assets_release(assets_t *assets, asset_t *asset);
 
 #endif
