@@ -27,10 +27,10 @@ static void player_create(player_t *player, assets_t *assets, f32 x, f32 y)
 	player->pos.x = x;
 	player->pos.y = y;
 
-	player->sprite.min.x = 384.f;
-	player->sprite.min.y = 160.f;
-	player->sprite.max.x = 396.f;
-	player->sprite.max.y = 176.f;
+	player->sprite.min.x = 306.f;
+	player->sprite.min.y = 112.f;
+	player->sprite.max.x = 306.f+12.f;
+	player->sprite.max.y = 112.f+16.f;
 
 	player->image = assets_get_image(assets, "data/dungeon_sheet.png");
 };
