@@ -14,6 +14,16 @@
 __declspec(dllexport) DWORD NvOptimusEnablement = 0x01;
 __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x01; 
 
+static aabb_t sprite_aabb(f32 x, f32 y, f32 w, f32 h)
+{
+	aabb_t aabb;
+	aabb.min.x = x;
+	aabb.min.y = y;
+	aabb.max.x = x+w;
+	aabb.max.y = y+h;
+	return aabb;
+};
+
 typedef struct
 {
 	v2 pos;
@@ -27,11 +37,7 @@ static void player_create(player_t *player, assets_t *assets, f32 x, f32 y)
 	player->pos.x = x;
 	player->pos.y = y;
 
-	player->sprite.min.x = 306.f;
-	player->sprite.min.y = 112.f;
-	player->sprite.max.x = 306.f+12.f;
-	player->sprite.max.y = 112.f+16.f;
-
+	player->sprite = sprite_aabb(306.f, 112.f, 12.f, 16.f);
 	player->image = assets_get_image(assets, "data/dungeon_sheet.png");
 };
 static void player_draw(player_t *player, draw_list_t *draw_list)
@@ -59,6 +65,7 @@ static void glfwCallbackError(int error, const char *msg)
 };
 int main(int argc, const char *argv[])
 {
+	const bool vsync = false;
 	const uint32_t window_width  = (1920 * 3) / 4;
 	const uint32_t window_height = (1080 * 3) / 4;
 
@@ -75,6 +82,8 @@ int main(int argc, const char *argv[])
 		if (window)
 		{
 			glfwMakeContextCurrent(window);
+			glfwSwapInterval(vsync);
+
 			if (gl3wInit() == 0)
 			{
 				printf("OpenGL %s\n", glGetString(GL_VERSION));
