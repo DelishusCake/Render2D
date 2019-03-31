@@ -6,8 +6,8 @@
 
 #include "assets.h"
 
-#define SCREEN_W	(1920)
-#define SCREEN_H	(1080)
+#define SCREEN_W	(1920 >> 2)
+#define SCREEN_H	(1080 >> 2)
 
 #define MAX_DRAW_CMDS	(1024)
 

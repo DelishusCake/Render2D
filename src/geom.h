@@ -58,6 +58,7 @@ inline v2 V2(f32 x, f32 y)
 }
 inline v2  v2_add(v2 a, v2 b)		{ return V2(a.x+b.x, a.y+b.y); };
 inline v2  v2_sub(v2 a, v2 b)  		{ return V2(a.x-b.x, a.y-b.y); };
+inline v2  v2_mul(v2 a, v2 b)	    { return V2(a.x*b.x, a.y*b.y); };
 inline v2  v2_scale(v2 v, f32 s)	{ return V2(v.x*s, v.y*s); };
 inline v2  v2_neg(v2 v)  			{ return V2(-v.x, -v.y); };
 inline v2  v2_perp(v2 v)			{ return V2(v.y, -v.x); }
