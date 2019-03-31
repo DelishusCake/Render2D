@@ -17,22 +17,49 @@ static inline uint32_t FNV_hash_32(const char* str)
 	return hash;                                           
 }  
 
-asset_cache_t* alloc_asset_cache()
+static image_t* image_load(const char *file_name)
 {
-	asset_cache_t *cache = malloc(sizeof(asset_cache_t));
-	assert(cache != NULL);
-	memset(cache, 0, sizeof(asset_cache_t));
-	return cache;
-};
-void free_asset_cache(asset_cache_t *cache)
-{
-	// Free the loaded assets
-	for (u32 i = 0; i < ASSET_HASH_LEN; i++)
+	image_t *image = NULL;
+
+	i32 w, h, c;
+	u8 *data = stbi_load(file_name, &w, &h, &c, STBI_rgb_alpha);
+	if (data)
 	{
-		// TODO: Free assets
-	};
-	// Free the cache structure
-	free(cache);
+		texture_t *texture = texture_alloc(w,h,data);
+		if (texture)
+		{
+			image = (image_t*) malloc(sizeof(image_t));
+			assert(image != NULL);
+			memset(image, 0, sizeof(image_t));
+			
+			image->asset.type = ASSET_IMAGE;
+			image->asset.ref_count = 1;
+			
+			image->width = w;
+			image->height = h;
+			image->texture = texture;
+		}
+		stbi_image_free(data);
+	}
+	return image;
+};
+static void image_free(image_t *image)
+{
+	texture_free(image->texture);
+	free(image);
+};
+
+static void asset_free(asset_t *asset)
+{
+	switch(asset->type)
+	{
+		case ASSET_NONE: break;
+		case ASSET_IMAGE:
+		{
+			image_t *image = (image_t *) asset;
+			image_free(image);
+		} break;
+	}
 };
 
 static asset_entry_t* asset_hash_lookup(asset_cache_t *cache, const char *file_name)
@@ -58,7 +85,30 @@ static asset_entry_t* asset_hash_lookup(asset_cache_t *cache, const char *file_n
 	return NULL;
 };
 
-image_t* get_image(asset_cache_t *cache, const char *file_name)
+asset_cache_t* asset_cache_alloc()
+{
+	asset_cache_t *cache = malloc(sizeof(asset_cache_t));
+	assert(cache != NULL);
+	memset(cache, 0, sizeof(asset_cache_t));
+	return cache;
+};
+void asset_cache_free(asset_cache_t *cache)
+{
+	// Free the loaded assets
+	for (u32 i = 0; i < ASSET_HASH_LEN; i++)
+	{
+		asset_entry_t *entry = cache->hash_map + i;
+		if (entry->asset)
+		{
+			asset_t *asset = entry->asset;
+			asset_free(asset);
+		};
+	};
+	// Free the cache structure
+	free(cache);
+};
+
+image_t* asset_cache_get_image(asset_cache_t *cache, const char *file_name)
 {
 	image_t *image = NULL;
 
@@ -67,53 +117,27 @@ image_t* get_image(asset_cache_t *cache, const char *file_name)
 	{
 		if (!entry->asset)
 		{
-			i32 w, h, c;
-			u8 *data = stbi_load(file_name, &w, &h, &c, STBI_rgb_alpha);
-			if (data)
+			image = image_load(file_name);
+			if (image)
 			{
-				texture_t *texture = alloc_texture(w,h,data);
-				if (texture)
-				{
-					image = (image_t*) malloc(sizeof(image_t));
-					assert(image != NULL);
-					memset(image, 0, sizeof(image_t));
-					
-					image->asset.type = ASSET_IMAGE;
-					image->asset.ref_count = 1;
-					
-					image->width = w;
-					image->height = h;
-					image->texture = texture;
-
-					entry->asset = (asset_t*) image;
-				}
-				stbi_image_free(data);
+				entry->asset = (asset_t*) image;
 			}
 		}else {
 			asset_t *asset = entry->asset;
 			if (asset->type == ASSET_IMAGE)
 			{
 				asset->ref_count ++;
-
 				image = (image_t*) asset;
 			}
 		}
 	}
 	return image;
 }; 
-void free_asset(asset_cache_t *cache, asset_t *asset)
+void asset_cache_release(asset_cache_t *cache, asset_t *asset)
 {
 	asset->ref_count --;
 	if (asset->ref_count == 0)
 	{
-		switch (asset->type)
-		{
-			case ASSET_NONE: break;
-			case ASSET_IMAGE:
-			{
-				image_t *image = (image_t *) asset;
-				free_texture(image->texture);
-			} break;
-		};
+		asset_free(asset);
 	}
 };

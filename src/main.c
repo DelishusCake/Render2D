@@ -40,35 +40,41 @@ int main(int argc, const char *argv[])
 				printf("OpenGL %s\n", glGetString(GL_VERSION));
 				printf("GLSL %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-				u32 frames = 0;
-				f64 timer = 0.0;
+				asset_cache_t *asset_cache = asset_cache_alloc();
 
-				f64 last = glfwGetTime();
-				while (!glfwWindowShouldClose(window))
+				if (asset_cache && render_init())
 				{
-					const f64 now = glfwGetTime();
-					const f64 delta = (now - last);
-					last = now;
+					u32 frames = 0;
+					f64 timer = 0.0;
 
-					i32 width, height;
-					glfwGetFramebufferSize(window, &width, &height);
-
-					render(width, height);
-					glfwSwapBuffers(window);
-
-					frames ++;
-					timer += delta;
-					if (timer >= 1.0)
+					f64 last = glfwGetTime();
+					while (!glfwWindowShouldClose(window))
 					{
-						char buf[128];
-						sprintf(buf, "Game - %dfps", frames);
-						glfwSetWindowTitle(window, buf);
+						const f64 now = glfwGetTime();
+						const f64 delta = (now - last);
+						last = now;
 
-						timer -= 1.0;
-						frames = 0;
-					}
-					glfwPollEvents();
-				};
+						i32 width, height;
+						glfwGetFramebufferSize(window, &width, &height);
+
+						render(width, height);
+						glfwSwapBuffers(window);
+
+						frames ++;
+						timer += delta;
+						if (timer >= 1.0)
+						{
+							char buf[128];
+							sprintf(buf, "Game - %dfps", frames);
+							glfwSetWindowTitle(window, buf);
+
+							timer -= 1.0;
+							frames = 0;
+						}
+						glfwPollEvents();
+					};
+				}
+
 			};
 		};
 		glfwTerminate();

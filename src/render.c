@@ -26,7 +26,7 @@ struct texture_t
 {
 	u32 handle;
 };
-texture_t* alloc_texture(u32 width, u32 height, u8 *data)
+texture_t* texture_alloc(u32 width, u32 height, u8 *data)
 {
 	u32 handle;
 	glGenTextures(1, &handle);
@@ -42,7 +42,7 @@ texture_t* alloc_texture(u32 width, u32 height, u8 *data)
 	texture->handle = handle;
 	return texture;
 };
-void free_texture(texture_t *texture)
+void texture_free(texture_t *texture)
 {
 	glDeleteTextures(1, &texture->handle);
 	free(texture);
