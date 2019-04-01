@@ -65,7 +65,7 @@ static struct
 	texture_t *destroy[256];
 } g_textures;
 
-static texture_t* get_free_texture_handle()
+static texture_t* get_texture_handle()
 {
 	texture_t *texture = NULL;
 	// If theres a texture in the free list
@@ -131,7 +131,7 @@ texture_t* texture_alloc(u32 width, u32 height, u8 *pixels)
 	const size_t size = width*height*4;
 
 	// Get a free texture handle
-	texture_t *texture = get_free_texture_handle();
+	texture_t *texture = get_texture_handle();
 	// Set the data
 	texture->w = width;
 	texture->h = height;
@@ -140,14 +140,14 @@ texture_t* texture_alloc(u32 width, u32 height, u8 *pixels)
 	assert(texture->pixels != NULL);
 	memcpy(texture->pixels, pixels, size);
 	// Insert into the creation list
-	const u32 index = atomic_inc(&g_textures.create_count);
+	const i32 index = atomic_inc(&g_textures.create_count);
 	g_textures.create[index] = texture;
 	return texture;
 };
 void texture_free(texture_t *texture)
 {
 	// Insert into the destroy list
-	const u32 index = atomic_inc(&g_textures.destroy_count);
+	const i32 index = atomic_inc(&g_textures.destroy_count);
 	g_textures.create[index] = texture;
 };
 
@@ -293,9 +293,6 @@ static void batch_free(batch_t *batch)
 static void batch_push(batch_t *batch, 
 	const texture_t *texture, aabb_t sprite, xform2d_t xform)
 {
-	// Make sure the texture handle is ok
-	assert (texture->handle != 0);
-
 	// Get the range
 	batch_range_t *range = NULL;
 	if (batch->range_count == 0)
@@ -460,8 +457,16 @@ void render(u32 width, u32 height, const draw_list_t *draw_list)
 		for (u32 i = 0; i < draw_list->cmd_count; i++)
 		{
 			const draw_cmd_t *cmd = draw_list->cmds + i;
-			const texture_t *texture = cmd->image->texture;
-			batch_push(batch, texture, cmd->sprite, cmd->xform);
+
+			const image_t *image = cmd->image;
+			if (image->asset.state == ASSET_STATE_LOADED)
+			{
+				const texture_t *texture = cmd->image->texture;
+				if (texture->handle)
+				{
+					batch_push(batch, texture, cmd->sprite, cmd->xform);
+				}
+			}
 		};
 		// Render the vertex batch
 		batch_flush(batch, &g_shader, &g_viewport);
@@ -471,4 +476,6 @@ void render(u32 width, u32 height, const draw_list_t *draw_list)
 	// Destroy any waiting textures
 	// NOTE: Done at end of frame in case any textures are still in use
 	destroy_textures();
+
+	Sleep(1000);
 };

@@ -17,9 +17,10 @@ static inline uint32_t FNV_hash_32(const char* str)
 	return hash;                                           
 }  
 
-static image_t* image_load(const char *file_name)
+// Loads an image and creates a texture
+static bool image_load(image_t *image, const char *file_name)
 {
-	image_t *image = NULL;
+	bool result = false;
 
 	i32 w, h, c;
 	u8 *data = stbi_load(file_name, &w, &h, &c, STBI_rgb_alpha);
@@ -27,30 +28,38 @@ static image_t* image_load(const char *file_name)
 	{
 		texture_t *texture = texture_alloc(w,h,data);
 		if (texture)
-		{
-			image = (image_t*) malloc(sizeof(image_t));
-			assert(image != NULL);
-			memset(image, 0, sizeof(image_t));
-			
-			image->asset.type = ASSET_IMAGE;
-			image->asset.ref_count = 1;
-			
+		{	
 			image->width = w;
 			image->height = h;
 			image->texture = texture;
+			result = true;
 		}
 		stbi_image_free(data);
 	}
-	return image;
+	return result;
 };
+// Frees image data
 static void image_free(image_t *image)
 {
 	texture_free(image->texture);
-	free(image);
 };
 
+static asset_t* asset_alloc(size_t size, asset_type_t type)
+{
+	asset_t *asset = (asset_t*) malloc(size);
+	assert(asset != NULL);
+	memset(asset, 0, size);
+	// Set the type
+	asset->type = type;
+	// Set the ref count to 1
+	asset->ref_count = 1;
+	// Set the state to none
+	asset->state = ASSET_STATE_NONE;
+	return asset;
+};
 static void asset_free(asset_t *asset)
 {
+	// Free based on type
 	switch(asset->type)
 	{
 		case ASSET_NONE: break;
@@ -60,6 +69,35 @@ static void asset_free(asset_t *asset)
 			image_free(image);
 		} break;
 	}
+	// Free the struct itself
+	free(asset);
+};
+
+static void enqueue_asset_entry(asset_queue_t *queue, asset_entry_t *entry)
+{
+	if ((queue->count + 1) < ASSET_QUEUE_LEN)
+	{
+		entry->asset->state = ASSET_STATE_QUEUED;
+
+		queue->tail = (queue->tail + 1) % ASSET_QUEUE_LEN;
+		queue->entries[queue->tail] = entry;
+
+		queue->count ++;
+
+		sem_post(&queue->sem);
+	};
+};
+static asset_entry_t* dequeue_asset_entry(asset_queue_t *queue)
+{
+	asset_entry_t *entry = NULL;
+	if ((queue->count - 1) >= 0)
+	{
+		entry = queue->entries[queue->head];
+		queue->head = (queue->head + 1) % ASSET_QUEUE_LEN;
+
+		queue->count --;
+	};
+	return entry;
 };
 
 static asset_entry_t* asset_hash_lookup(assets_t *assets, const char *file_name)
@@ -85,15 +123,59 @@ static asset_entry_t* asset_hash_lookup(assets_t *assets, const char *file_name)
 	return NULL;
 };
 
+static void* load_proc(void *data)
+{
+	asset_queue_t *queue = (asset_queue_t*) data;
+	while (!queue->done)
+	{
+		if (queue->count != 0)
+		{
+			asset_entry_t *entry = dequeue_asset_entry(queue);
+			assert (entry != NULL);
+
+			asset_t *asset = entry->asset;
+			const char *file_name = entry->name;
+			switch (asset->type)
+			{
+				case ASSET_NONE: break;
+				case ASSET_IMAGE:
+				{
+					image_t *image = (image_t *) asset;
+					if (image_load(image, file_name))
+					{
+						asset->state = ASSET_STATE_LOADED;
+					} else {
+						asset->state = ASSET_STATE_FAILED;
+					}
+				};
+			};
+		};
+		sem_wait(&queue->sem);
+	};
+	return NULL;
+};
 assets_t* assets_alloc()
 {
 	assets_t *assets = malloc(sizeof(assets_t));
 	assert(assets != NULL);
 	memset(assets, 0, sizeof(assets_t));
+
+	asset_queue_t *load_queue = &assets->load_queue;
+	load_queue->head = 0; 
+	load_queue->tail = (ASSET_QUEUE_LEN-1); 
+	sem_init(&load_queue->sem, 0, ASSET_QUEUE_LEN);
+
+	pthread_create(&assets->load_thread, NULL, load_proc, load_queue);
+
 	return assets;
 };
 void assets_free(assets_t *assets)
 {
+	// Join the load thread
+	asset_queue_t *load_queue = &assets->load_queue;
+	load_queue->done = true;
+	sem_post(&load_queue->sem);
+	pthread_join(assets->load_thread, NULL);
 	// Free the loaded assets
 	for (u32 i = 0; i < ASSET_HASH_LEN; i++)
 	{
@@ -117,11 +199,13 @@ image_t* assets_get_image(assets_t *assets, const char *file_name)
 	{
 		if (!entry->asset)
 		{
-			image = image_load(file_name);
-			if (image)
-			{
-				entry->asset = (asset_t*) image;
-			}
+			image = (image_t*) asset_alloc(sizeof(image_t), ASSET_IMAGE); 
+			
+			strcpy(entry->name, file_name);
+			entry->asset = (asset_t*) image;
+
+			asset_queue_t *load_queue = &assets->load_queue;
+			enqueue_asset_entry(load_queue, entry);
 		}else {
 			asset_t *asset = entry->asset;
 			if (asset->type == ASSET_IMAGE)
@@ -132,13 +216,20 @@ image_t* assets_get_image(assets_t *assets, const char *file_name)
 		}
 	}
 	return image;
-}; 
+};
 void assets_release(assets_t *assets, asset_t *asset)
 {
 	asset->ref_count --;
 	if (asset->ref_count == 0)
 	{
 		asset_free(asset);
+	}
+};
+void assets_wait_for(asset_t *assets, const asset_t *asset)
+{
+	while (asset->state != ASSET_STATE_LOADED)
+	{
+		_mm_pause();
 	}
 };
 
