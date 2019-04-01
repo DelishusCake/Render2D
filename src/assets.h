@@ -67,7 +67,8 @@ typedef struct
 	bool done;
 
 	volatile u32 count;
-	volatile u32 head, tail;
+	
+	u32 head, tail;
 	asset_entry_t *entries[ASSET_QUEUE_LEN];
 } asset_queue_t;
 // Asset cache data structure

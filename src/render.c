@@ -476,6 +476,4 @@ void render(u32 width, u32 height, const draw_list_t *draw_list)
 	// Destroy any waiting textures
 	// NOTE: Done at end of frame in case any textures are still in use
 	destroy_textures();
-
-	Sleep(1000);
 };

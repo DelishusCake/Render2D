@@ -88,5 +88,9 @@ inline u32 atomic_inc(volatile u32 *value)
 {
 	return __sync_fetch_and_add(value, 1);
 };
+inline u32 atomic_dec(volatile u32 *value)
+{
+	return __sync_fetch_and_add(value, -1);
+};
 
 #endif
