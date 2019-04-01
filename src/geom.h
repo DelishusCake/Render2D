@@ -234,6 +234,15 @@ typedef struct
 	v2 min, max;
 } aabb_t;
 
+inline aabb_t aabb_rect(f32 x, f32 y, f32 w, f32 h)
+{
+	aabb_t aabb;
+	aabb.min.x = x;
+	aabb.min.y = y;
+	aabb.max.x = x+w;
+	aabb.max.y = y+h;
+	return aabb;
+};
 inline f32 aabb_perimeter(aabb_t aabb)
 {
 	const f32 d_x = aabb.max.x - aabb.min.x;

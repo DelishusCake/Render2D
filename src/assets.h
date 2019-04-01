@@ -57,7 +57,12 @@ typedef struct
 assets_t* assets_alloc();
 void      assets_free(assets_t *assets);
 
-image_t*  assets_get_image(assets_t *assets, const char *file_name); 
-void      assets_release(assets_t *assets, asset_t *asset);
+// Gets an image asset handle from the asset cache
+image_t*  assets_get_image(assets_t *assets, const char *file_name);
+// Returns an asset to the cache 
+void assets_release(assets_t *assets, asset_t *asset);
+
+// Directly load an entire file from the hard disk
+u8* load_entire_file(const char *file_name, size_t *size);
 
 #endif

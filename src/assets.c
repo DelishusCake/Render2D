@@ -141,3 +141,26 @@ void assets_release(assets_t *assets, asset_t *asset)
 		asset_free(asset);
 	}
 };
+
+u8* load_entire_file(const char *file_name, size_t *size)
+{
+	u8* buffer = NULL;
+
+	FILE *f = fopen(file_name, "rb");
+	if (f)
+	{
+		fseek(f, 0, SEEK_END);
+		const size_t f_size = ftell(f);
+		fseek(f, 0, SEEK_SET);
+
+		buffer = malloc((f_size+1)*sizeof(u8));
+		assert(buffer != NULL);
+		fread(buffer, sizeof(u8), f_size, f);
+		fclose(f);
+
+		buffer[f_size] = '\0';
+
+		if (size) *size = f_size;
+	};
+	return buffer;
+};

@@ -1,11 +1,5 @@
 #include "render.h"
 
-#define GLSL_HEADER	\
-	"#version 330 core\n"\
-	"#extension GL_ARB_separate_shader_objects : enable\n"
-
-#define GLSL(code)	GLSL_HEADER#code
-
 typedef struct
 {
 	u32 size;			// Size (in # of members) of the vertex attrib
@@ -50,64 +44,112 @@ static vertex_t vertex(v2 pos, v2 uv)
 
 struct texture_t
 {
-	v2 i_size;
+	// Texture data
+	u32 w, h;
+	u8 *pixels;
+	// OpenGL texture handle
 	u32 handle;
+	// Freelist pointer
+	texture_t *next_free;
 };
-texture_t* texture_alloc(u32 width, u32 height, u8 *data)
+
+static struct
 {
-	u32 handle;
-	glGenTextures(1, &handle);
+	// Free texture handle list
+	texture_t *free_texture;
+	// Creation list
+	volatile u32 create_count;
+	texture_t *create[256];
+	// Destruction list
+	volatile u32 destroy_count;
+	texture_t *destroy[256];
+} g_textures;
 
-	glBindTexture(GL_TEXTURE_2D, handle);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glBindTexture(GL_TEXTURE_2D, 0);
+static texture_t* get_free_texture_handle()
+{
+	texture_t *texture = NULL;
+	// If theres a texture in the free list
+	if (g_textures.free_texture != NULL)
+	{
+		// Get the head of the free list
+		texture = g_textures.free_texture;
+		// Move the list forward
+		g_textures.free_texture = texture->next_free;
+	} else {
+		// Nothing in the list, allocate a new one
+		texture = malloc(sizeof(texture_t));
+		assert(texture != NULL);
+	}
+	// Zero everything
+	memset(texture, 0, sizeof(texture_t));
+	return texture;
+};
+static void free_texture_handle(texture_t *texture)
+{
+	texture->next_free = g_textures.free_texture;
+	g_textures.free_texture = texture;
+}
+static void create_textures()
+{
+	// Create every texture in the creation list
+	for (u32 i = 0; i < g_textures.create_count; i++)
+	{
+		texture_t *texture = g_textures.create[i];
 
-	texture_t *texture = malloc(sizeof(texture_t));
-	assert(texture != NULL);
-	texture->i_size = V2(1.f / (f32) width, 1.f / (f32) height);
-	texture->handle = handle;
+		glGenTextures(1, &texture->handle);
+
+		glBindTexture(GL_TEXTURE_2D, texture->handle);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexImage2D(GL_TEXTURE_2D, 
+			0, GL_RGBA, texture->w, texture->h, 
+			0, GL_RGBA, GL_UNSIGNED_BYTE, texture->pixels);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+	// Reset list
+	g_textures.create_count = 0;
+};
+static void destroy_textures()
+{
+	for (u32 i = 0; i < g_textures.destroy_count; i++)
+	{
+		// Free texture data
+		texture_t *texture = g_textures.create[i];
+		glDeleteTextures(1, &texture->handle);
+		free(texture->pixels);
+		// Add to the free list
+		free_texture_handle(texture);
+	}
+	// Reset list
+	g_textures.destroy_count = 0;
+};
+
+texture_t* texture_alloc(u32 width, u32 height, u8 *pixels)
+{
+	// TODO: Thread safety
+	// TODO: Texture formats
+	const size_t size = width*height*4;
+
+	// Get a free texture handle
+	texture_t *texture = get_free_texture_handle();
+	// Set the data
+	texture->w = width;
+	texture->h = height;
+	// Allocate and copy the pixel array
+	texture->pixels = malloc(size);
+	assert(texture->pixels != NULL);
+	memcpy(texture->pixels, pixels, size);
+	// Insert into the creation list
+	const u32 index = atomic_inc(&g_textures.create_count);
+	g_textures.create[index] = texture;
 	return texture;
 };
 void texture_free(texture_t *texture)
 {
-	glDeleteTextures(1, &texture->handle);
-	free(texture);
+	// Insert into the destroy list
+	const u32 index = atomic_inc(&g_textures.destroy_count);
+	g_textures.create[index] = texture;
 };
-
-const char *g_shader_vertex = GLSL(
-	layout(location=0) in vec2 i_pos;
-	layout(location=1) in vec2 i_uv;
-
-	out VS_OUT
-	{
-		vec2 uv;
-	} vs_out;
-
-	uniform mat4 u_projection;
-
-	void main()
-	{
-		vs_out.uv = i_uv;
-		gl_Position = u_projection * vec4(i_pos, 0.f, 1.f);
-	};
-);
-const char *g_shader_fragment = GLSL(
-	in VS_OUT
-	{
-		vec2 uv;
-	} fs_in;
-
-	uniform sampler2D u_sampler;
-
-	out vec4 o_frag;
-
-	void main()
-	{
-		o_frag = texture(u_sampler, fs_in.uv);
-	};
-);
 
 typedef struct
 {
@@ -117,35 +159,47 @@ typedef struct
 	u32 u_sampler;
 } draw_shader_t;
 
-static void draw_shader_create(draw_shader_t *shader)
+static bool load_draw_shader(draw_shader_t *shader)
 {
-	const u32 shader_vert = glCreateShader(GL_VERTEX_SHADER);
-	const u32 shader_frag = glCreateShader(GL_FRAGMENT_SHADER);
+	bool result = false;
 
-	glShaderSource(shader_vert, 1, &g_shader_vertex, NULL);
-	glShaderSource(shader_frag, 1, &g_shader_fragment, NULL);
-
-	glCompileShader(shader_vert);
-	glCompileShader(shader_frag);
-
-	shader->program = glCreateProgram();
-	glAttachShader(shader->program, shader_vert);
-	glAttachShader(shader->program, shader_frag);
-	glLinkProgram(shader->program);
-
-	glDeleteShader(shader_vert);
-	glDeleteShader(shader_frag);
-
-	int len;
-	char buf[1024];
-	glGetProgramInfoLog(shader->program, static_len(buf), &len, buf);
-	if(len)
+	char *vert_code = (char*) load_entire_file("data/shader.vert", NULL);
+	char *frag_code = (char*) load_entire_file("data/shader.frag", NULL);
+	if (vert_code && frag_code)
 	{
-		fprintf(stderr, buf);
-	}
+		const u32 shader_vert = glCreateShader(GL_VERTEX_SHADER);
+		const u32 shader_frag = glCreateShader(GL_FRAGMENT_SHADER);
 
-	shader->u_projection = glGetUniformLocation(shader->program, "u_projection");
-	shader->u_sampler = glGetUniformLocation(shader->program, "u_sampler");
+		glShaderSource(shader_vert, 1, (const char**) &vert_code, NULL);
+		glShaderSource(shader_frag, 1, (const char**) &frag_code, NULL);
+
+		glCompileShader(shader_vert);
+		glCompileShader(shader_frag);
+
+		shader->program = glCreateProgram();
+		glAttachShader(shader->program, shader_vert);
+		glAttachShader(shader->program, shader_frag);
+		glLinkProgram(shader->program);
+
+		glDeleteShader(shader_vert);
+		glDeleteShader(shader_frag);
+
+		int len;
+		char buf[1024];
+		glGetProgramInfoLog(shader->program, static_len(buf), &len, buf);
+		if (!len)
+		{
+			shader->u_projection = glGetUniformLocation(shader->program, "u_projection");
+			shader->u_sampler = glGetUniformLocation(shader->program, "u_sampler");
+			result = true;
+		} else {
+			fprintf(stderr, buf);
+		}
+
+		free(vert_code);
+		free(frag_code);
+	}
+	return result;
 };
 
 typedef struct
@@ -194,7 +248,7 @@ static v2 get_viewport_point(const viewport_t *viewport, v2 v)
 typedef struct
 {
 	// Range texture
-	texture_t *texture;
+	u32 texture_handle;
 	// Range coordinates
 	u32 offset; // Offset, in number of vertices
 	u32 count;	// Count, in number of vertices
@@ -237,15 +291,18 @@ static void batch_free(batch_t *batch)
 	free(batch);
 }
 static void batch_push(batch_t *batch, 
-	texture_t *texture, aabb_t sprite, xform2d_t xform)
+	const texture_t *texture, aabb_t sprite, xform2d_t xform)
 {
+	// Make sure the texture handle is ok
+	assert (texture->handle != 0);
+
 	// Get the range
 	batch_range_t *range = NULL;
 	if (batch->range_count == 0)
 	{
 		// No current range, initialze one
 		range = batch->ranges + batch->range_count++;
-		range->texture = texture;
+		range->texture_handle = texture->handle;
 		range->offset = 0;
 		range->count = 0;
 	} else {
@@ -253,14 +310,16 @@ static void batch_push(batch_t *batch,
 		range = batch->ranges + (batch->range_count-1);
 	}
 	// There's a new texture!
-	if (range->texture != texture)
+	if (range->texture_handle != texture->handle)
 	{
 		// Create a new range
 		range = batch->ranges + batch->range_count ++;
-		range->texture = texture;
+		range->texture_handle = texture->handle;
 		range->offset = batch->vertex_count;
 		range->count = 0;
 	};
+	// Inverse texture size for UV calculation
+	const v2 i_size = V2(1.f / (f32) texture->w, 1.f / (f32) texture->h);
 	// Get the size of the sprite
 	const v2 sprite_scale = v2_sub(sprite.max, sprite.min);
 	// Calculate the transformed sprite vertices
@@ -274,10 +333,10 @@ static void batch_push(batch_t *batch,
 	// Calculate the sprite texture coordinates
 	const v2 sprite_uvs[] = 
 	{
-		v2_mul(texture->i_size, V2(sprite.min.x, sprite.min.y)),
-		v2_mul(texture->i_size, V2(sprite.max.x, sprite.min.y)),
-		v2_mul(texture->i_size, V2(sprite.max.x, sprite.max.y)),
-		v2_mul(texture->i_size, V2(sprite.min.x, sprite.max.y)),
+		v2_mul(i_size, V2(sprite.min.x, sprite.min.y)),
+		v2_mul(i_size, V2(sprite.max.x, sprite.min.y)),
+		v2_mul(i_size, V2(sprite.max.x, sprite.max.y)),
+		v2_mul(i_size, V2(sprite.min.x, sprite.max.y)),
 	};
 
 	// Sprite indices
@@ -325,7 +384,7 @@ static void batch_flush(batch_t *batch, const draw_shader_t *shader, const viewp
 						const batch_range_t *range = batch->ranges + i;
 						// Bind the range texture
 						glActiveTexture(GL_TEXTURE0); 
-						glBindTexture(GL_TEXTURE_2D, range->texture->handle);
+						glBindTexture(GL_TEXTURE_2D, range->texture_handle);
 						// Issue the range draw call
 						glDrawArrays(GL_TRIANGLES, range->offset, range->count);
 					};
@@ -348,11 +407,14 @@ static draw_shader_t g_shader;
 
 bool render_init()
 {
-	g_current_batch = 0;
-	g_batches[0] = batch_alloc();
-	g_batches[1] = batch_alloc();
-	draw_shader_create(&g_shader);
-	return true;
+	if (load_draw_shader(&g_shader))
+	{	
+		g_current_batch = 0;
+		g_batches[0] = batch_alloc();
+		g_batches[1] = batch_alloc();
+		return true;
+	}
+	return false;
 };
 void render_free()
 {
@@ -362,7 +424,12 @@ void render_free()
 
 void render(u32 width, u32 height, const draw_list_t *draw_list)
 {
+	// Calculate the viewport for the frame
 	g_viewport = get_viewport(width, height);
+
+	// Create/upload any waiting textures
+	// NOTE: Done at start of frame to make sure textures are ready for use
+	create_textures();
 
 	// Clear the whole screen for the "black bars" effect
 	glDisable(GL_SCISSOR_TEST);
@@ -393,11 +460,15 @@ void render(u32 width, u32 height, const draw_list_t *draw_list)
 		for (u32 i = 0; i < draw_list->cmd_count; i++)
 		{
 			const draw_cmd_t *cmd = draw_list->cmds + i;
-			batch_push(batch, cmd->image->texture, cmd->sprite, cmd->xform);
+			const texture_t *texture = cmd->image->texture;
+			batch_push(batch, texture, cmd->sprite, cmd->xform);
 		};
 		// Render the vertex batch
 		batch_flush(batch, &g_shader, &g_viewport);
 		// Double buffered batches for faster rendering
-		g_current_batch = 1 - g_current_batch;
+		g_current_batch = (1 - g_current_batch);
 	}
+	// Destroy any waiting textures
+	// NOTE: Done at end of frame in case any textures are still in use
+	destroy_textures();
 };
