@@ -18,6 +18,9 @@ decl_struct(r2d_texture_t);
 bool r2d_init();
 void r2d_free();
 
+// Get the viewport position of a point on the screen
+v2 r2d_screen_to_viewport(v2 screen);
+
 // Allocate/free teextures for drawing
 r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels);
 void           r2d_free_texture(r2d_texture_t *texture);

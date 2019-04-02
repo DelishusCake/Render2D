@@ -100,9 +100,6 @@ static struct
 } g_viewport;
 
 static void r2d_calculate_viewport(u32 width, u32 height);
-#if 0
-static v2 r2d_get_viewport_point(v2 v);
-#endif
 
 typedef struct
 {
@@ -174,6 +171,9 @@ static struct
 	r2d_texture_t *destroy[256];
 } g_textures;
 
+static r2d_texture_t* r2d_get_texture_handle();
+static void r2d_free_texture_handle(r2d_texture_t *texture);
+
 static void r2d_create_queued_textures();
 static void r2d_destroy_queued_textures();
 
@@ -192,6 +192,38 @@ void r2d_free()
 	r2d_free_draw_shader();
 	r2d_free_draw_list();
 	r2d_free_batch();
+};
+
+r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
+{
+	// TODO: Texture formats
+	const size_t size = width*height*4;
+
+	// Get a free texture handle
+	r2d_texture_t *texture = r2d_get_texture_handle();
+	// Set the data
+	texture->w = width;
+	texture->h = height;
+	// Allocate and copy the pixel array
+	texture->pixels = malloc(size);
+	assert(texture->pixels != NULL);
+	memcpy(texture->pixels, pixels, size);
+	// Insert into the creation list
+	g_textures.create[atomic_inc(&g_textures.create_count)] = texture;
+	return texture;
+};
+void r2d_free_texture(r2d_texture_t *texture)
+{
+	// Insert into the destroy list
+	g_textures.create[atomic_inc(&g_textures.destroy_count)] = texture;
+};
+
+v2 r2d_screen_to_viewport(v2 screen)
+{
+	v2 v;
+	v.x = (screen.x / g_viewport.scale.x) - (g_viewport.x*g_viewport.scale.x);
+	v.y = (screen.y / g_viewport.scale.y) - (g_viewport.y*g_viewport.scale.y);
+	return v;
 };
 
 void r2d_clear(u32 width, u32 height)
@@ -327,15 +359,6 @@ static void r2d_calculate_viewport(u32 width, u32 height)
 	const m44 scale = m44_scale(g_viewport.scale.x, g_viewport.scale.y, 1.f);
 	g_viewport.projection = m44_mul(ortho, scale);
 };
-#if 0
-static v2 r2d_get_viewport_point(, v2 v)
-{
-	v2 r;
-	r.x = (v.x / viewport->scale_x) - viewport->x*viewport->scale_x;
-	r.y = (v.y / viewport->scale_y) - viewport->y*viewport->scale_y;
-	return r;
-}
-#endif
 
 static void r2d_alloc_batch()
 {
@@ -501,32 +524,6 @@ static void r2d_free_texture_handle(r2d_texture_t *texture)
 	texture->next_free = g_textures.free_texture;
 	g_textures.free_texture = texture;
 }
-r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
-{
-	// TODO: Thread safety
-	// TODO: Texture formats
-	const size_t size = width*height*4;
-
-	// Get a free texture handle
-	r2d_texture_t *texture = r2d_get_texture_handle();
-	// Set the data
-	texture->w = width;
-	texture->h = height;
-	// Allocate and copy the pixel array
-	texture->pixels = malloc(size);
-	assert(texture->pixels != NULL);
-	memcpy(texture->pixels, pixels, size);
-	// Insert into the creation list
-	const i32 index = atomic_inc(&g_textures.create_count);
-	g_textures.create[index] = texture;
-	return texture;
-};
-void r2d_free_texture(r2d_texture_t *texture)
-{
-	// Insert into the destroy list
-	const i32 index = atomic_inc(&g_textures.destroy_count);
-	g_textures.create[index] = texture;
-};
 
 static void r2d_create_queued_textures()
 {
