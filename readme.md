@@ -6,7 +6,7 @@ A small C library for efficient 2D rendering with OpenGL (and maybe Vulkan in th
 
 The entire library is contained within the render2.h/.c files.
 
-You will need the gl3w OpenGL library to compile by default, but you can substitute your own OpenGL loaded pretty easily.
+You will need the gl3w OpenGL library to compile by default, but you can substitute your own OpenGL loader pretty easily.
 
 # Examples
 
