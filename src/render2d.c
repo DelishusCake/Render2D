@@ -1,10 +1,36 @@
 #include "render2d.h"
 
-#define MAX_DRAW_CMDS	(1024)
-
+// Maximum draw commands allowed in the draw list 
+#define MAX_DRAW_CMDS		(1024)
+// Batch limits
 #define MAX_BATCH_RANGES	(1024)
 #define MAX_BATCH_VERTS		(MAX_BATCH_RANGES*6)
 
+// Helper function for loading a file from disk
+static u8* r2d_load_entire_file(const char *file_name, size_t *size)
+{
+	u8* buffer = NULL;
+
+	FILE *f = fopen(file_name, "rb");
+	if (f)
+	{
+		fseek(f, 0, SEEK_END);
+		const size_t f_size = ftell(f);
+		fseek(f, 0, SEEK_SET);
+
+		buffer = malloc((f_size+1)*sizeof(u8));
+		assert(buffer != NULL);
+		fread(buffer, sizeof(u8), f_size, f);
+		fclose(f);
+
+		buffer[f_size] = '\0';
+
+		if (size) *size = f_size;
+	};
+	return buffer;
+};
+
+// Structure for describing OpenGL vertex layouts
 typedef struct
 {
 	u32 size;			// Size (in # of members) of the vertex attrib
@@ -49,29 +75,6 @@ static inline r2d_vertex_t r2d_vertex(v2 pos, v2 uv)
 	vertex.uv = uv;
 	return vertex;
 }
-
-static u8* r2d_load_entire_file(const char *file_name, size_t *size)
-{
-	u8* buffer = NULL;
-
-	FILE *f = fopen(file_name, "rb");
-	if (f)
-	{
-		fseek(f, 0, SEEK_END);
-		const size_t f_size = ftell(f);
-		fseek(f, 0, SEEK_SET);
-
-		buffer = malloc((f_size+1)*sizeof(u8));
-		assert(buffer != NULL);
-		fread(buffer, sizeof(u8), f_size, f);
-		fclose(f);
-
-		buffer[f_size] = '\0';
-
-		if (size) *size = f_size;
-	};
-	return buffer;
-};
 
 // Default drawing shader
 static struct
