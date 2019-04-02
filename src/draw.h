@@ -24,10 +24,10 @@ typedef struct
 	draw_cmd_t cmds[MAX_DRAW_CMDS];
 } draw_list_t;
 
-draw_list_t* draw_list_alloc();
-void         draw_list_free(draw_list_t *draw_list);
+draw_list_t* alloc_draw_list();
+void         free_draw_list(draw_list_t *draw_list);
 
-void draw_list_clear(draw_list_t *draw_list);
+void clear_draw_list(draw_list_t *draw_list);
 void draw_sprite(draw_list_t *draw_list, image_t *image, aabb_t sprite, xform2d_t xform);
 
 #endif

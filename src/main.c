@@ -46,15 +46,15 @@ int main(int argc, const char *argv[])
 				printf("OpenGL %s\n", glGetString(GL_VERSION));
 				printf("GLSL %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-				draw_list_t *draw_list = draw_list_alloc();
-				assets_t *assets = assets_alloc();
+				assets_t *assets = alloc_assets();
+				draw_list_t *draw_list = alloc_draw_list();
 
-				if (assets && draw_list && render_init())
+				if (assets && draw_list && init_renderer())
 				{
 					u32 frames = 0;
 					f64 timer = 0.0;
 
-					game_init(assets);
+					init_game(assets);
 
 					f64 last = glfwGetTime();
 					while (!glfwWindowShouldClose(window))
@@ -63,11 +63,10 @@ int main(int argc, const char *argv[])
 						const f64 delta = (now - last);
 						last = now;
 
-						game_update_and_draw(delta, assets, draw_list);
-
 						i32 width, height;
 						glfwGetFramebufferSize(window, &width, &height);
 
+						update_and_draw_game(delta, assets, draw_list);
 						render(width, height, draw_list);
 						glfwSwapBuffers(window);
 
@@ -84,9 +83,9 @@ int main(int argc, const char *argv[])
 						}
 						glfwPollEvents();
 					};
-					assets_free(assets);
-					draw_list_free(draw_list);
-					render_free();
+					free_draw_list(draw_list);
+					free_assets(assets);
+					free_renderer();
 				}
 			};
 		};

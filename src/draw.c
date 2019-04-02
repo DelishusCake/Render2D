@@ -1,18 +1,18 @@
 #include "draw.h"
 
-draw_list_t* draw_list_alloc()
+draw_list_t* alloc_draw_list()
 {
 	draw_list_t *draw_list = malloc(sizeof(draw_list_t));
 	assert(draw_list != NULL);
 	memset(draw_list, 0, sizeof(draw_list_t));
 	return draw_list;
 };
-void draw_list_free(draw_list_t *draw_list)
+void free_draw_list(draw_list_t *draw_list)
 {
 	free(draw_list);
 };
 
-void draw_list_clear(draw_list_t *draw_list)
+void clear_draw_list(draw_list_t *draw_list)
 {
 	draw_list->cmd_count = 0;
 };

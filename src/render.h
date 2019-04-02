@@ -9,8 +9,8 @@
 #include "draw.h"
 #include "assets.h"
 
-bool render_init();
-void render_free();
+bool init_renderer();
+void free_renderer();
 
 void render(u32 width, u32 height, const draw_list_t *draw_list);
 

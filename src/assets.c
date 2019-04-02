@@ -1,5 +1,12 @@
 #include "assets.h"
 
+// Max length, in bytes, that a filename can be 
+#define ASSET_NAME_LEN	(512)
+// Max length of the asset hash map
+#define ASSET_HASH_LEN	(1024)
+// Max length of the asset queue
+#define ASSET_QUEUE_LEN	(512)
+
 // 32bit FNV-1a hash
 // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
 static inline uint32_t FNV_hash_32(const char* str)
@@ -18,7 +25,7 @@ static inline uint32_t FNV_hash_32(const char* str)
 }  
 
 // Loads an image and creates a texture
-static bool image_load(image_t *image, const char *file_name)
+static bool load_image(image_t *image, const char *file_name)
 {
 	bool result = false;
 
@@ -29,7 +36,7 @@ static bool image_load(image_t *image, const char *file_name)
 	{
 		// Create a texture handle
 		// NOTE: There is no guarantee the texture is actually ready at this point!
-		texture_t *texture = texture_alloc(w,h,data);
+		texture_t *texture = alloc_texture(w,h,data);
 		if (texture)
 		{	
 			// Set the image data
@@ -45,9 +52,9 @@ static bool image_load(image_t *image, const char *file_name)
 	return result;
 };
 // Frees image data
-static void image_free(image_t *image)
+static void free_image(image_t *image)
 {
-	texture_free(image->texture);
+	free_texture(image->texture);
 };
 
 static asset_t* asset_alloc(size_t size, asset_type_t type)
@@ -58,13 +65,11 @@ static asset_t* asset_alloc(size_t size, asset_type_t type)
 	memset(asset, 0, size);
 	// Set the type
 	asset->type = type;
-	// Set the ref count to 1
-	asset->ref_count = 1;
 	// Set the state to none
 	asset->state = ASSET_STATE_NONE;
 	return asset;
 };
-static void asset_free(asset_t *asset)
+static void free_asset(asset_t *asset)
 {
 	// Free based on type
 	switch(asset->type)
@@ -73,12 +78,30 @@ static void asset_free(asset_t *asset)
 		case ASSET_IMAGE:
 		{
 			image_t *image = (image_t *) asset;
-			image_free(image);
+			free_image(image);
 		} break;
 	}
 	// Free the struct itself
 	free(asset);
 };
+
+// Asset hash entry
+typedef struct
+{
+	char name[ASSET_NAME_LEN];
+	asset_t *asset;
+} asset_entry_t;
+// Asset queue structure
+typedef struct
+{
+	sem_t sem;
+	bool done;
+
+	volatile u32 count;
+	
+	u32 head, tail;
+	asset_entry_t *entries[ASSET_QUEUE_LEN];
+} asset_queue_t;
 
 static void enqueue_asset_entry(asset_queue_t *queue, asset_entry_t *entry)
 {
@@ -111,20 +134,26 @@ static asset_entry_t* dequeue_asset_entry(asset_queue_t *queue)
 	return entry;
 };
 
-static asset_entry_t* asset_hash_lookup(assets_t *assets, const char *file_name)
+// Hash map structure
+typedef struct
+{
+	asset_entry_t entries[ASSET_HASH_LEN];
+} asset_hash_t;
+
+static asset_entry_t* asset_hash_lookup(asset_hash_t *hash, const char *file_name)
 {
 	// Make sure the file name is the right size
 	assert (strlen(file_name) < ASSET_NAME_LEN);
 	// Get the hash of the file name
-	const u32 hash = FNV_hash_32(file_name);
+	const u32 name_hash = FNV_hash_32(file_name);
 	// Get the initial index to check
-	const u32 init_index = (hash % ASSET_HASH_LEN);
+	const u32 init_index = (name_hash % ASSET_HASH_LEN);
 
 	u32 index = init_index;
 	do 
 	{
 		// Get the current entry
-		asset_entry_t *entry = (assets->hash_map + index);
+		asset_entry_t *entry = (hash->entries + index);
 		// If the entry has an asset
 		if (entry->asset)
 		{
@@ -143,6 +172,16 @@ static asset_entry_t* asset_hash_lookup(assets_t *assets, const char *file_name)
 	} while(index != init_index);
 	// No open slots and no matches, the hash list is full
 	return NULL;
+};
+
+// Asset cache data structure
+struct assets_t
+{
+	// Hash map for asset lookup
+	asset_hash_t hash;
+	// Queue for asset loading
+	asset_queue_t load_queue;
+	pthread_t load_thread;
 };
 
 static void* load_proc(void *data)
@@ -168,7 +207,7 @@ static void* load_proc(void *data)
 				case ASSET_IMAGE:
 				{
 					image_t *image = (image_t *) asset;
-					if (image_load(image, file_name))
+					if (load_image(image, file_name))
 					{
 						asset->state = ASSET_STATE_LOADED;
 					} else {
@@ -182,7 +221,7 @@ static void* load_proc(void *data)
 	};
 	return NULL;
 };
-assets_t* assets_alloc()
+assets_t* alloc_assets()
 {
 	assets_t *assets = malloc(sizeof(assets_t));
 	assert(assets != NULL);
@@ -198,10 +237,12 @@ assets_t* assets_alloc()
 
 	return assets;
 };
-void assets_free(assets_t *assets)
+void free_assets(assets_t *assets)
 {
-	// Set the termination signal 
+	asset_hash_t *hash = &assets->hash;
 	asset_queue_t *load_queue = &assets->load_queue;
+
+	// Set the termination signal 
 	load_queue->done = true;
 	// Wake up the load thread (if not already awake)
 	sem_post(&load_queue->sem);
@@ -210,23 +251,27 @@ void assets_free(assets_t *assets)
 	// Free the loaded assets
 	for (u32 i = 0; i < ASSET_HASH_LEN; i++)
 	{
-		asset_entry_t *entry = assets->hash_map + i;
+
+		asset_entry_t *entry = hash->entries + i;
 		if (entry->asset)
 		{
 			asset_t *asset = entry->asset;
-			asset_free(asset);
+			free_asset(asset);
 		};
 	};
 	// Free the assets structure
 	free(assets);
 };
 
-image_t* assets_get_image(assets_t *assets, const char *file_name)
+image_t* get_image_asset(assets_t *assets, const char *file_name)
 {
 	image_t *image = NULL;
 
+	asset_hash_t *hash = &assets->hash;
+	asset_queue_t *load_queue = &assets->load_queue;
+
 	// Get the entry for this asset
-	asset_entry_t *entry = asset_hash_lookup(assets, file_name);
+	asset_entry_t *entry = asset_hash_lookup(hash, file_name);
 	if (entry != NULL)
 	{
 		// If the entry is empty
@@ -236,7 +281,6 @@ image_t* assets_get_image(assets_t *assets, const char *file_name)
 			image = (image_t*) asset_alloc(sizeof(image_t), ASSET_IMAGE); 
 			entry->asset = (asset_t*) image;
 			// Enqueue a load for it
-			asset_queue_t *load_queue = &assets->load_queue;
 			enqueue_asset_entry(load_queue, entry);
 		}else {
 			// Get the asset
@@ -244,29 +288,32 @@ image_t* assets_get_image(assets_t *assets, const char *file_name)
 			// Make sure it's an image
 			if (asset->type == ASSET_IMAGE)
 			{
-				// Increment the reference count and return the asset
-				asset->ref_count ++;
 				image = (image_t*) asset;
 			}
+		}
+		// Increment the reference count and return the asset
+		if (image)
+		{
+			image->asset.ref_count ++;
 		}
 	}
 	return image;
 };
-void assets_release(assets_t *assets, asset_t *asset)
+void release_asset(assets_t *assets, asset_t *asset)
 {
 	// Decrement the reference count
 	asset->ref_count --;
 	// If it goes to zero, free the asset
 	if (asset->ref_count <= 0)
 	{
-		asset_free(asset);
+		free_asset(asset);
 	}
 };
-void assets_wait_for(asset_t *assets, const asset_t *asset)
+void wait_for_asset(asset_t *assets, const asset_t *asset)
 {
 	// Spinlock until the asset is loaded or fails to load
 	while (
-		(asset->state != ASSET_STATE_LOADED) ||
+		(asset->state != ASSET_STATE_LOADED) &&
 		(asset->state != ASSET_STATE_FAILED))
 	{
 		_mm_pause();

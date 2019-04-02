@@ -7,7 +7,7 @@
 #include "draw.h"
 #include "assets.h"
 
-void game_init(assets_t *assets);
-void game_update_and_draw(f64 delta, assets_t *assets, draw_list_t *draw_list);
+void init_game(assets_t *assets);
+void update_and_draw_game(f64 delta, assets_t *assets, draw_list_t *draw_list);
 
 #endif
