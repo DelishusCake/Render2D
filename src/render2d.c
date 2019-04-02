@@ -1,4 +1,9 @@
-#include "render.h"
+#include "render2d.h"
+
+#define MAX_BATCH_RANGES	(1024)
+#define MAX_BATCH_VERTS		(MAX_BATCH_RANGES*6)
+
+#define MAX_DRAW_CMDS	(1024)
 
 typedef struct
 {
@@ -45,6 +50,29 @@ static inline vertex_t vertex(v2 pos, v2 uv)
 	return vertex;
 }
 
+static u8* load_entire_file(const char *file_name, size_t *size)
+{
+	u8* buffer = NULL;
+
+	FILE *f = fopen(file_name, "rb");
+	if (f)
+	{
+		fseek(f, 0, SEEK_END);
+		const size_t f_size = ftell(f);
+		fseek(f, 0, SEEK_SET);
+
+		buffer = malloc((f_size+1)*sizeof(u8));
+		assert(buffer != NULL);
+		fread(buffer, sizeof(u8), f_size, f);
+		fclose(f);
+
+		buffer[f_size] = '\0';
+
+		if (size) *size = f_size;
+	};
+	return buffer;
+};
+
 // Default drawing shader
 static struct
 {
@@ -71,9 +99,6 @@ static void calculate_viewport(u32 width, u32 height);
 #if 0
 static v2 get_viewport_point(v2 v);
 #endif
-
-#define MAX_BATCH_RANGES	(1024)
-#define MAX_BATCH_VERTS		(MAX_BATCH_RANGES*6)
 
 typedef struct
 {
@@ -103,11 +128,26 @@ static struct
 static void alloc_batch();
 static void free_batch();
 
-static void push_sprite(const texture_t *texture, aabb_t sprite, xform2d_t xform);
+static void push_sprite(const r2d_texture_t *texture, aabb_t sprite, xform2d_t xform);
 static void flush_batch();
 
+typedef struct
+{
+	aabb_t sprite;
+	xform2d_t xform;
+	r2d_texture_t *texture;
+} draw_cmd_t;
+static struct
+{
+	u32 cmd_count;
+	draw_cmd_t *cmds;
+} g_draw_list;
+
+static bool alloc_draw_list();
+static void free_draw_list();
+
 // Internal texture handle
-struct texture_t
+struct r2d_texture_t
 {
 	// Texture data
 	u32 w, h;
@@ -115,43 +155,58 @@ struct texture_t
 	// OpenGL texture handle
 	u32 handle;
 	// Free list pointer
-	texture_t *next_free;
+	r2d_texture_t *next_free;
 };
 
 static struct
 {
 	// Free texture handle list
-	texture_t *free_texture;
+	r2d_texture_t *free_texture;
 	// Creation list
 	volatile u32 create_count;
-	texture_t *create[256];
+	r2d_texture_t *create[256];
 	// Destruction list
 	volatile u32 destroy_count;
-	texture_t *destroy[256];
+	r2d_texture_t *destroy[256];
 } g_textures;
 
 static void create_textures();
 static void destroy_textures();
 
-bool init_renderer()
+bool r2d_init()
 {
 	if (load_draw_shader())
 	{	
 		alloc_batch();
+		alloc_draw_list();
 		return true;
 	}
 	return false;
 };
-void free_renderer()
+void r2d_free()
 {
+	free_draw_list();
 	free_batch();
 };
 
-void render(u32 width, u32 height, const draw_list_t *draw_list)
+void r2d_clear(u32 width, u32 height)
 {
+	g_draw_list.cmd_count = 0;
 	// Calculate the viewport for the frame
 	calculate_viewport(width, height);
+};
+void r2d_draw_sprite(r2d_texture_t *texture, aabb_t sprite, xform2d_t xform)
+{
+	assert((g_draw_list.cmd_count+1) < MAX_DRAW_CMDS);
 
+	const u32 index = g_draw_list.cmd_count ++;
+	draw_cmd_t *cmd = g_draw_list.cmds + index;
+	cmd->xform = xform;
+	cmd->sprite = sprite;
+	cmd->texture = texture;
+};
+void r2d_flush()
+{
 	// Create/upload any waiting textures
 	// NOTE: Done at start of frame to make sure textures are ready for use
 	create_textures();
@@ -181,18 +236,13 @@ void render(u32 width, u32 height, const draw_list_t *draw_list)
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 		// Build the vertex batch
-		for (u32 i = 0; i < draw_list->cmd_count; i++)
+		for (u32 i = 0; i < g_draw_list.cmd_count; i++)
 		{
-			const draw_cmd_t *cmd = draw_list->cmds + i;
-
-			const image_t *image = cmd->image;
-			if (image->asset.state == ASSET_STATE_LOADED)
+			const draw_cmd_t *cmd = g_draw_list.cmds + i;
+			const r2d_texture_t *texture = cmd->texture;
+			if (texture->handle)
 			{
-				const texture_t *texture = cmd->image->texture;
-				if (texture->handle)
-				{
-					push_sprite(texture, cmd->sprite, cmd->xform);
-				}
+				push_sprite(texture, cmd->sprite, cmd->xform);
 			}
 		};
 		// Render the vertex batch
@@ -248,7 +298,7 @@ static bool load_draw_shader()
 
 static void calculate_viewport(u32 width, u32 height)
 {
-	const f32 aspect_ratio = ((f32) SCREEN_W / (f32) SCREEN_H);
+	const f32 aspect_ratio = ((f32) R2D_SCREEN_W / (f32) R2D_SCREEN_H);
 
 	g_viewport.w = width;
 	g_viewport.h = (int) (g_viewport.w / aspect_ratio + 0.5f);
@@ -260,8 +310,8 @@ static void calculate_viewport(u32 width, u32 height)
 	g_viewport.x = (width - g_viewport.w) / 2;
 	g_viewport.y = (height - g_viewport.h) / 2;
 
-	g_viewport.scale.x = ((f32) width / SCREEN_W);
-	g_viewport.scale.y = ((f32) height / SCREEN_H);
+	g_viewport.scale.x = ((f32) width / R2D_SCREEN_W);
+	g_viewport.scale.y = ((f32) height / R2D_SCREEN_H);
 
 	const m44 ortho = m44_orthoOffCenter(0.f, (f32) width, (f32) height, 0.f, -1.f, 1.f);
 	const m44 scale = m44_scale(g_viewport.scale.x, g_viewport.scale.y, 1.f);
@@ -310,7 +360,7 @@ static void free_batch()
 	free(g_batch.vertices);
 	free(g_batch.ranges);
 }
-static void push_sprite(const texture_t *texture, aabb_t sprite, xform2d_t xform)
+static void push_sprite(const r2d_texture_t *texture, aabb_t sprite, xform2d_t xform)
 {
 	// Get the range
 	batch_range_t *range = NULL;
@@ -417,9 +467,9 @@ static void flush_batch()
 	g_batch.current = 1 - g_batch.current;
 };
 
-static texture_t* get_texture_handle()
+static r2d_texture_t* get_texture_handle()
 {
-	texture_t *texture = NULL;
+	r2d_texture_t *texture = NULL;
 	// If theres a texture in the free list
 	if (g_textures.free_texture != NULL)
 	{
@@ -429,26 +479,26 @@ static texture_t* get_texture_handle()
 		g_textures.free_texture = texture->next_free;
 	} else {
 		// Nothing in the list, allocate a new one
-		texture = malloc(sizeof(texture_t));
+		texture = malloc(sizeof(r2d_texture_t));
 		assert(texture != NULL);
 	}
 	// Zero everything
-	memset(texture, 0, sizeof(texture_t));
+	memset(texture, 0, sizeof(r2d_texture_t));
 	return texture;
 };
-static void free_texture_handle(texture_t *texture)
+static void free_texture_handle(r2d_texture_t *texture)
 {
 	texture->next_free = g_textures.free_texture;
 	g_textures.free_texture = texture;
 }
-texture_t* alloc_texture(u32 width, u32 height, u8 *pixels)
+r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
 {
 	// TODO: Thread safety
 	// TODO: Texture formats
 	const size_t size = width*height*4;
 
 	// Get a free texture handle
-	texture_t *texture = get_texture_handle();
+	r2d_texture_t *texture = get_texture_handle();
 	// Set the data
 	texture->w = width;
 	texture->h = height;
@@ -461,7 +511,7 @@ texture_t* alloc_texture(u32 width, u32 height, u8 *pixels)
 	g_textures.create[index] = texture;
 	return texture;
 };
-void free_texture(texture_t *texture)
+void r2d_free_texture(r2d_texture_t *texture)
 {
 	// Insert into the destroy list
 	const i32 index = atomic_inc(&g_textures.destroy_count);
@@ -473,7 +523,7 @@ static void create_textures()
 	// Create every texture in the creation list
 	for (u32 i = 0; i < g_textures.create_count; i++)
 	{
-		texture_t *texture = g_textures.create[i];
+		r2d_texture_t *texture = g_textures.create[i];
 
 		glGenTextures(1, &texture->handle);
 
@@ -493,7 +543,7 @@ static void destroy_textures()
 	for (u32 i = 0; i < g_textures.destroy_count; i++)
 	{
 		// Free texture data
-		texture_t *texture = g_textures.create[i];
+		r2d_texture_t *texture = g_textures.create[i];
 		glDeleteTextures(1, &texture->handle);
 		free(texture->pixels);
 		// Add to the free list
@@ -501,4 +551,16 @@ static void destroy_textures()
 	}
 	// Reset list
 	g_textures.destroy_count = 0;
+};
+
+static bool alloc_draw_list()
+{
+	g_draw_list.cmd_count = 0;
+	g_draw_list.cmds = malloc(MAX_DRAW_CMDS*sizeof(draw_cmd_t));
+	assert(g_draw_list.cmds != NULL);
+	return true;
+};
+static void free_draw_list()
+{
+	free(g_draw_list.cmds);
 };

@@ -37,7 +37,7 @@ static void free_world(world_t *world, assets_t *assets);
 static entity_t create_entity(world_t *world, component_set_t components);
 static void     destroy_entity(world_t *world, assets_t *assets, entity_t entity);
 
-static void system_draw_sprites(world_t *world, draw_list_t *draw_list, f64 delta);
+static void system_draw_sprites(world_t *world, f64 delta);
 
 static entity_t create_player(world_t *world, assets_t *assets, v2 pos)
 {
@@ -56,20 +56,34 @@ static entity_t create_player(world_t *world, assets_t *assets, v2 pos)
 };
 
 static world_t *g_world;
+static assets_t *g_assets;
 
-void init_game(assets_t *assets)
+bool init_game()
 {
-	g_world = alloc_world();
-	create_player(g_world, assets, V2(100.f, 100.f));
+	if (r2d_init())
+	{
+		g_world = alloc_world();
+		g_assets = alloc_assets();
+
+		create_player(g_world, g_assets, V2(100.f, 100.f));
+
+		return true;
+	}
+	return false;
 };
-void free_game(assets_t *assets)
+void free_game()
 {
-	free_world(g_world, assets);
+	free_world(g_world, g_assets);
+	free_assets(g_assets);
+	r2d_free();
 }
-void update_and_draw_game(f64 delta, assets_t *assets, draw_list_t *draw_list)
+void update_and_draw_game(i32 width, i32 height, f64 delta)
 {
-	clear_draw_list(draw_list);
-	system_draw_sprites(g_world, draw_list, delta);
+	r2d_clear(width, height);
+	{
+		system_draw_sprites(g_world, delta);
+	}
+	r2d_flush();
 };
 
 static world_t* alloc_world()
@@ -123,7 +137,7 @@ static void destroy_entity(world_t *world, assets_t *assets, entity_t entity)
 	world->free_entity = entity;
 };
 
-static void system_draw_sprites(world_t *world, draw_list_t *draw_list, f64 delta)
+static void system_draw_sprites(world_t *world, f64 delta)
 {
 	const component_set_t components = (COMPONENT_TRANSFORM | COMPONENT_SPRITE);
 	for (u32 i = 0; i < world->entity_count; i++)
@@ -132,7 +146,13 @@ static void system_draw_sprites(world_t *world, draw_list_t *draw_list, f64 delt
 		{
 			const sprite_t *sprite = world->sprite + i;
 			const xform2d_t xform = world->transform[i];
-			draw_sprite(draw_list, sprite->image, sprite->aabb, xform);
+
+			const image_t *image = sprite->image;
+			if (image->asset.state == ASSET_STATE_LOADED)
+			{
+				r2d_texture_t *texture = image->texture; 
+				r2d_draw_sprite(texture, sprite->aabb, xform);
+			}
 		};
 	};
 };

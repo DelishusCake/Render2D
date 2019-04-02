@@ -4,12 +4,6 @@
 #include <glfw\glfw3.h>
 
 #include "core.h"
-#include "geom.h"
-
-#include "draw.h"
-#include "assets.h"
-#include "render.h"
-
 #include "game.h"
 
 // Ensure we're using the discrete GPU on laptops
@@ -23,8 +17,8 @@ static void glfwCallbackError(int error, const char *msg)
 int main(int argc, const char *argv[])
 {
 	const bool vsync = true;
-	const uint32_t window_width  = ((SCREEN_W << 2) * 3) / 4;
-	const uint32_t window_height = ((SCREEN_H << 2) * 3) / 4;
+	const uint32_t window_width  = (1920 * 3) / 4;
+	const uint32_t window_height = (1080 * 3) / 4;
 
 	glfwSetErrorCallback(glfwCallbackError);
 	if (glfwInit())
@@ -46,15 +40,10 @@ int main(int argc, const char *argv[])
 				printf("OpenGL %s\n", glGetString(GL_VERSION));
 				printf("GLSL %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-				assets_t *assets = alloc_assets();
-				draw_list_t *draw_list = alloc_draw_list();
-
-				if (assets && draw_list && init_renderer())
+				if (init_game())
 				{
 					u32 frames = 0;
 					f64 timer = 0.0;
-
-					init_game(assets);
 
 					f64 last = glfwGetTime();
 					while (!glfwWindowShouldClose(window))
@@ -66,8 +55,7 @@ int main(int argc, const char *argv[])
 						i32 width, height;
 						glfwGetFramebufferSize(window, &width, &height);
 
-						update_and_draw_game(delta, assets, draw_list);
-						render(width, height, draw_list);
+						update_and_draw_game(width, height, delta);
 						glfwSwapBuffers(window);
 
 						frames ++;
@@ -83,11 +71,7 @@ int main(int argc, const char *argv[])
 						}
 						glfwPollEvents();
 					};
-					free_game(assets);
-
-					free_draw_list(draw_list);
-					free_assets(assets);
-					free_renderer();
+					free_game();
 				}
 			};
 		};

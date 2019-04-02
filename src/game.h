@@ -4,12 +4,12 @@
 #include "core.h"
 
 #include "geom.h"
-#include "draw.h"
 #include "assets.h"
+#include "render2d.h"
 
-void init_game(assets_t *assets);
-void free_game(assets_t *assets);
+bool init_game();
+void free_game();
 
-void update_and_draw_game(f64 delta, assets_t *assets, draw_list_t *draw_list);
+void update_and_draw_game(i32 width, i32 height, f64 delta);
 
 #endif

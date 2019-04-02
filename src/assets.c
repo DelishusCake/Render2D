@@ -36,7 +36,7 @@ static bool load_image(image_t *image, const char *file_name)
 	{
 		// Create a texture handle
 		// NOTE: There is no guarantee the texture is actually ready at this point!
-		texture_t *texture = alloc_texture(w,h,data);
+		r2d_texture_t *texture = r2d_alloc_texture(w,h,data);
 		if (texture)
 		{	
 			// Set the image data
@@ -54,7 +54,7 @@ static bool load_image(image_t *image, const char *file_name)
 // Frees image data
 static void free_image(image_t *image)
 {
-	free_texture(image->texture);
+	r2d_free_texture(image->texture);
 };
 
 static asset_t* asset_alloc(size_t size, asset_type_t type)
@@ -318,27 +318,4 @@ void wait_for_asset(asset_t *assets, const asset_t *asset)
 	{
 		_mm_pause();
 	}
-};
-
-u8* load_entire_file(const char *file_name, size_t *size)
-{
-	u8* buffer = NULL;
-
-	FILE *f = fopen(file_name, "rb");
-	if (f)
-	{
-		fseek(f, 0, SEEK_END);
-		const size_t f_size = ftell(f);
-		fseek(f, 0, SEEK_SET);
-
-		buffer = malloc((f_size+1)*sizeof(u8));
-		assert(buffer != NULL);
-		fread(buffer, sizeof(u8), f_size, f);
-		fclose(f);
-
-		buffer[f_size] = '\0';
-
-		if (size) *size = f_size;
-	};
-	return buffer;
 };

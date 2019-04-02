@@ -1,18 +1,13 @@
 #ifndef ASSETS_H
 #define ASSETS_H
 
-#include <stb_image.h>
-
 #include <pthread.h>
 #include <semaphore.h>
 
-#include "core.h"
+#include <stb_image.h>
 
-// Platform specific assets/functions
-// NOTE: For internal use only
-decl_struct(texture_t);
-texture_t* alloc_texture(u32 width, u32 height, u8 *pixels);
-void       free_texture(texture_t *texture);
+#include "core.h"
+#include "render2d.h"
 
 // General asset header data
 typedef enum
@@ -44,7 +39,7 @@ typedef struct
 	asset_t asset;
 	// Asset data
 	u32 width, height;
-	texture_t *texture;
+	r2d_texture_t *texture;
 } image_t;
 
 // Declare the asset cache structure
@@ -62,8 +57,5 @@ void release_asset(assets_t *assets, asset_t *asset);
 // Wait until an asset is completely loaded
 // NOTE: Blocking! Don't use unless completely necessary
 void wait_for_asset(asset_t *assets, const asset_t *asset);
-
-// Directly load an entire file from the hard disk
-u8* load_entire_file(const char *file_name, size_t *size);
 
 #endif
