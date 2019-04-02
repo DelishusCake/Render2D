@@ -5,7 +5,7 @@ inc := include/
 
 bin := game.exe
 def := DEBUG
-opt := -std=c11 -c -g -O3 -msse2 -Wall
+opt := -std=c11 -c -O3 -msse2 -Wall
 lib := pthread glfw3 gdi32 opengl32
 
 out/%.o: src/%.c

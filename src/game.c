@@ -31,51 +31,13 @@ typedef struct
 	u32       next_free[MAX_ENTITIES];
 } world_t;
 
-static world_t* alloc_world()
-{
-	world_t *world = malloc(sizeof(world_t));
-	assert(world != NULL);
-	memset(world, 0, sizeof(world_t));
+static world_t* alloc_world();
+static void free_world(world_t *world, assets_t *assets);
 
-	for (u32 i = 0; i < MAX_ENTITIES; i++)
-	{
-		world->next_free[i] = NULL_ENTITY;
-	}
-	world->free_entity = NULL_ENTITY;
+static entity_t create_entity(world_t *world, component_set_t components);
+static void     destroy_entity(world_t *world, assets_t *assets, entity_t entity);
 
-	return world;
-};
-static entity_t create_entity(world_t *world, component_set_t components)
-{
-	entity_t entity = NULL_ENTITY;
-	if (world->free_entity != NULL_ENTITY)
-	{
-		entity = world->free_entity;
-		world->free_entity = world->next_free[entity];
-	} else {
-		assert((world->entity_count+1) < MAX_ENTITIES);
-		entity = world->entity_count ++;
-	};
-	if (entity != NULL_ENTITY)
-	{
-		world->components[entity] = components;
-	};
-	return entity;
-};
-
-static void system_draw_sprites(world_t *world, draw_list_t *draw_list, f64 delta)
-{
-	const component_set_t components = (COMPONENT_TRANSFORM | COMPONENT_SPRITE);
-	for (u32 i = 0; i < world->entity_count; i++)
-	{
-		if ((world->components[i] & components) == components)
-		{
-			const sprite_t *sprite = world->sprite + i;
-			const xform2d_t xform = world->transform[i];
-			draw_sprite(draw_list, sprite->image, sprite->aabb, xform);
-		};
-	};
-};
+static void system_draw_sprites(world_t *world, draw_list_t *draw_list, f64 delta);
 
 static entity_t create_player(world_t *world, assets_t *assets, v2 pos)
 {
@@ -100,8 +62,77 @@ void init_game(assets_t *assets)
 	g_world = alloc_world();
 	create_player(g_world, assets, V2(100.f, 100.f));
 };
+void free_game(assets_t *assets)
+{
+	free_world(g_world, assets);
+}
 void update_and_draw_game(f64 delta, assets_t *assets, draw_list_t *draw_list)
 {
 	clear_draw_list(draw_list);
 	system_draw_sprites(g_world, draw_list, delta);
+};
+
+static world_t* alloc_world()
+{
+	world_t *world = malloc(sizeof(world_t));
+	assert(world != NULL);
+	memset(world, 0, sizeof(world_t));
+
+	for (u32 i = 0; i < MAX_ENTITIES; i++)
+	{
+		world->next_free[i] = NULL_ENTITY;
+	}
+	world->free_entity = NULL_ENTITY;
+
+	return world;
+};
+static void free_world(world_t *world, assets_t *assets)
+{
+	for (u32 i = 0; i < world->entity_count; i++)
+	{
+		destroy_entity(world, assets, i);
+	}
+	free(world);
+};
+static entity_t create_entity(world_t *world, component_set_t components)
+{
+	entity_t entity = NULL_ENTITY;
+	if (world->free_entity != NULL_ENTITY)
+	{
+		entity = world->free_entity;
+		world->free_entity = world->next_free[entity];
+	} else {
+		assert((world->entity_count+1) < MAX_ENTITIES);
+		entity = world->entity_count ++;
+	};
+	if (entity != NULL_ENTITY)
+	{
+		world->components[entity] = components;
+	};
+	return entity;
+};
+static void destroy_entity(world_t *world, assets_t *assets, entity_t entity)
+{
+	if (world->components[entity] & COMPONENT_SPRITE)
+	{
+		sprite_t *sprite = world->sprite + entity;
+		release_asset(assets, (asset_t*) sprite->image);
+	};
+
+	world->next_free[entity] = world->free_entity;
+	world->free_entity = entity;
+};
+
+static void system_draw_sprites(world_t *world, draw_list_t *draw_list, f64 delta)
+{
+	const component_set_t components = (COMPONENT_TRANSFORM | COMPONENT_SPRITE);
+	for (u32 i = 0; i < world->entity_count; i++)
+	{
+		if ((world->components[i] & components) == components)
+		{
+			const sprite_t *sprite = world->sprite + i;
+			const xform2d_t xform = world->transform[i];
+			draw_sprite(draw_list, sprite->image, sprite->aabb, xform);
+		};
+	};
 };

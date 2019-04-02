@@ -83,6 +83,8 @@ int main(int argc, const char *argv[])
 						}
 						glfwPollEvents();
 					};
+					free_game(assets);
+
 					free_draw_list(draw_list);
 					free_assets(assets);
 					free_renderer();
