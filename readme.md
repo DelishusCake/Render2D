@@ -1,5 +1,4 @@
 # Render2D
----
 
 A small C library for efficient 2D rendering with OpenGL (and maybe Vulkan in the future).
 
