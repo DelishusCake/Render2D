@@ -1,10 +1,11 @@
 #include "render2d.h"
 
+#define MAX_TEXTURES		(256)
 // Maximum draw commands allowed in the draw list 
 #define MAX_DRAW_CMDS		(1024)
 // Batch limits
 #define MAX_BATCH_RANGES	(1024)
-#define MAX_BATCH_VERTS		(MAX_BATCH_RANGES*6)
+#define MAX_BATCH_VERTS		(MAX_DRAW_CMDS*6)
 
 // Helper function for loading a file from disk
 static u8* r2d_load_entire_file(const char *file_name, size_t *size)
@@ -161,18 +162,22 @@ struct r2d_texture_t
 
 static struct
 {
+	// Texture list
+	volatile u32 texture_count;
+	r2d_texture_t textures[MAX_TEXTURES];
 	// Free texture handle list
 	r2d_texture_t *free_texture;
 	// Creation list
 	volatile u32 create_count;
-	r2d_texture_t *create[256];
+	r2d_texture_t *create[MAX_TEXTURES];
 	// Destruction list
 	volatile u32 destroy_count;
-	r2d_texture_t *destroy[256];
-} g_textures;
+	r2d_texture_t *destroy[MAX_TEXTURES];
+} g_texture_list;
 
 static r2d_texture_t* r2d_get_texture_handle();
 static void r2d_free_texture_handle(r2d_texture_t *texture);
+static void r2d_free_all_textures();
 
 static void r2d_create_queued_textures();
 static void r2d_destroy_queued_textures();
@@ -189,6 +194,7 @@ bool r2d_init()
 };
 void r2d_free()
 {
+	r2d_free_all_textures();
 	r2d_free_draw_shader();
 	r2d_free_draw_list();
 	r2d_free_batch();
@@ -198,7 +204,6 @@ r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
 {
 	// TODO: Texture formats
 	const size_t size = width*height*4;
-
 	// Get a free texture handle
 	r2d_texture_t *texture = r2d_get_texture_handle();
 	// Set the data
@@ -209,13 +214,15 @@ r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
 	assert(texture->pixels != NULL);
 	memcpy(texture->pixels, pixels, size);
 	// Insert into the creation list
-	g_textures.create[atomic_inc(&g_textures.create_count)] = texture;
+	assert ((g_texture_list.create_count + 1) < MAX_TEXTURES);
+	g_texture_list.create[atomic_inc(&g_texture_list.create_count)] = texture;
 	return texture;
 };
 void r2d_free_texture(r2d_texture_t *texture)
 {
 	// Insert into the destroy list
-	g_textures.create[atomic_inc(&g_textures.destroy_count)] = texture;
+	assert ((g_texture_list.destroy_count + 1) < MAX_TEXTURES);
+	g_texture_list.create[atomic_inc(&g_texture_list.destroy_count)] = texture;
 };
 
 v2 r2d_screen_to_viewport(v2 screen)
@@ -504,16 +511,17 @@ static r2d_texture_t* r2d_get_texture_handle()
 {
 	r2d_texture_t *texture = NULL;
 	// If theres a texture in the free list
-	if (g_textures.free_texture != NULL)
+	if (g_texture_list.free_texture != NULL)
 	{
 		// Get the head of the free list
-		texture = g_textures.free_texture;
+		texture = g_texture_list.free_texture;
 		// Move the list forward
-		g_textures.free_texture = texture->next_free;
+		g_texture_list.free_texture = texture->next_free;
 	} else {
 		// Nothing in the list, allocate a new one
-		texture = malloc(sizeof(r2d_texture_t));
-		assert(texture != NULL);
+		assert ((g_texture_list.texture_count + 1) < MAX_TEXTURES);
+		const u32 index = atomic_inc(&g_texture_list.texture_count);
+		texture = g_texture_list.textures + index;
 	}
 	// Zero everything
 	memset(texture, 0, sizeof(r2d_texture_t));
@@ -521,16 +529,29 @@ static r2d_texture_t* r2d_get_texture_handle()
 };
 static void r2d_free_texture_handle(r2d_texture_t *texture)
 {
-	texture->next_free = g_textures.free_texture;
-	g_textures.free_texture = texture;
+	texture->next_free = g_texture_list.free_texture;
+	g_texture_list.free_texture = texture;
 }
+static void r2d_free_all_textures()
+{
+	for (u32 i = 0; i < g_texture_list.texture_count; i++)
+	{
+		// Free texture data
+		r2d_texture_t *texture = g_texture_list.textures + i;
+		if (texture->handle)
+			glDeleteTextures(1, &texture->handle);
+		if (texture->pixels)
+			free(texture->pixels);
+	}
+	g_texture_list.texture_count = 0;
+};
 
 static void r2d_create_queued_textures()
 {
 	// Create every texture in the creation list
-	for (u32 i = 0; i < g_textures.create_count; i++)
+	for (u32 i = 0; i < g_texture_list.create_count; i++)
 	{
-		r2d_texture_t *texture = g_textures.create[i];
+		r2d_texture_t *texture = g_texture_list.create[i];
 
 		glGenTextures(1, &texture->handle);
 
@@ -543,21 +564,21 @@ static void r2d_create_queued_textures()
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 	// Reset list
-	g_textures.create_count = 0;
+	g_texture_list.create_count = 0;
 };
 static void r2d_destroy_queued_textures()
 {
-	for (u32 i = 0; i < g_textures.destroy_count; i++)
+	for (u32 i = 0; i < g_texture_list.destroy_count; i++)
 	{
 		// Free texture data
-		r2d_texture_t *texture = g_textures.create[i];
+		r2d_texture_t *texture = g_texture_list.create[i];
 		glDeleteTextures(1, &texture->handle);
 		free(texture->pixels);
 		// Add to the free list
 		r2d_free_texture_handle(texture);
 	}
 	// Reset list
-	g_textures.destroy_count = 0;
+	g_texture_list.destroy_count = 0;
 };
 
 static bool r2d_alloc_draw_list()
