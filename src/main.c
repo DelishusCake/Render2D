@@ -16,7 +16,7 @@ static void glfwCallbackError(int error, const char *msg)
 };
 int main(int argc, const char *argv[])
 {
-	const bool vsync = true;
+	const bool vsync = false;
 	const uint32_t window_width  = (1920 * 3) / 4;
 	const uint32_t window_height = (1080 * 3) / 4;
 
