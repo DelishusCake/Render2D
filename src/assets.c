@@ -97,40 +97,48 @@ typedef struct
 	sem_t sem;
 	bool done;
 
-	volatile u32 count;
-	
+	ticket_mtx_t mtx;
+
+	u32 count;
 	u32 head, tail;
 	asset_entry_t *entries[ASSET_QUEUE_LEN];
 } asset_queue_t;
 
 static void enqueue_asset_entry(asset_queue_t *queue, asset_entry_t *entry)
 {
-	// If the entry will fit in the queue
-	if ((queue->count + 1) < ASSET_QUEUE_LEN)
+	ticket_mtx_lock(&queue->mtx);
 	{
-		// Set the state to queued
-		entry->asset->state = ASSET_STATE_QUEUED;
-		// Put the entry at the end of the queue
-		queue->tail = (queue->tail + 1) % ASSET_QUEUE_LEN;
-		queue->entries[queue->tail] = entry;
-		// Atomic increment the count
-		atomic_inc(&queue->count);
-		// Wake up the load thread
-		sem_post(&queue->sem);
-	};
+		// If the entry will fit in the queue
+		if ((queue->count + 1) < ASSET_QUEUE_LEN)
+		{
+			// Set the state to queued
+			entry->asset->state = ASSET_STATE_QUEUED;
+			// Put the entry at the end of the queue
+			queue->tail = (queue->tail + 1) % ASSET_QUEUE_LEN;
+			queue->entries[queue->tail] = entry;
+			queue->count ++;
+			// Wake up the load thread
+			sem_post(&queue->sem);
+		};
+	}
+	ticket_mtx_unlock(&queue->mtx);
 };
 static asset_entry_t* dequeue_asset_entry(asset_queue_t *queue)
 {
-	// If there's anything in the queue
 	asset_entry_t *entry = NULL;
-	if ((queue->count - 1) >= 0)
+	ticket_mtx_lock(&queue->mtx);
 	{
-		// Get the entry at the front of the queue
-		entry = queue->entries[queue->head];
-		queue->head = (queue->head + 1) % ASSET_QUEUE_LEN;
-		// Atomic decrement the count
-		atomic_dec(&queue->count);
-	};
+		// If there's anything in the queue
+		if ((queue->count - 1) >= 0)
+		{
+			// Get the entry at the front of the queue
+			entry = queue->entries[queue->head];
+			queue->head = (queue->head + 1) % ASSET_QUEUE_LEN;
+
+			queue->count --;
+		};
+	}
+	ticket_mtx_unlock(&queue->mtx);
 	return entry;
 };
 

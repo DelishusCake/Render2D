@@ -84,13 +84,30 @@ inline f32 f32_cos(f32 v)         { return cosf(v); }
 inline f32 f32_atan(f32 v)        { return atanf(v); }
 
 // Atomic operations
-inline u32 atomic_inc(volatile u32 *value)
+inline u32 u32_atomic_inc(volatile u32 *value)
 {
 	return __sync_fetch_and_add(value, 1);
 };
-inline u32 atomic_dec(volatile u32 *value)
+inline u64 u64_atomic_inc(volatile u64 *value)
 {
-	return __sync_fetch_and_add(value, -1);
+	return __sync_fetch_and_add(value, 1);
+};
+
+// Ticket mutex implementation
+typedef struct
+{
+	volatile u64 next;
+	volatile u64 current;
+} ticket_mtx_t;
+
+inline void ticket_mtx_lock(ticket_mtx_t *mtx)
+{
+	const u64 ticket = u64_atomic_inc(&mtx->next);
+	while (ticket != mtx->current) _mm_pause();
+};
+inline void ticket_mtx_unlock(ticket_mtx_t *mtx)
+{
+	u64_atomic_inc(&mtx->current);
 };
 
 #endif

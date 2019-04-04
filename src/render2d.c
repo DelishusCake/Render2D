@@ -162,19 +162,24 @@ struct r2d_texture_t
 
 static struct
 {
+	// Texture list write mutex
+	// NOTE: Only used to control write operations (create/destroy/etc.), read access is free
+	ticket_mtx_t mtx;
+
 	// Texture list
-	volatile u32 texture_count;
+	u32 texture_count;
 	r2d_texture_t textures[MAX_TEXTURES];
-	// Free texture handle list
-	r2d_texture_t *free_texture;
+	r2d_texture_t *free_texture; // Texture free list
+
 	// Creation list
-	volatile u32 create_count;
+	u32 create_count;
 	r2d_texture_t *create[MAX_TEXTURES];
 	// Destruction list
-	volatile u32 destroy_count;
+	u32 destroy_count;
 	r2d_texture_t *destroy[MAX_TEXTURES];
 } g_texture_list;
 
+static void r2d_init_textures();
 static r2d_texture_t* r2d_get_texture_handle();
 static void r2d_free_texture_handle(r2d_texture_t *texture);
 static void r2d_free_all_textures();
@@ -186,6 +191,8 @@ bool r2d_init()
 {
 	if (r2d_load_draw_shader())
 	{	
+		r2d_init_textures();
+
 		r2d_alloc_batch();
 		r2d_alloc_draw_list();
 		return true;
@@ -198,31 +205,6 @@ void r2d_free()
 	r2d_free_draw_shader();
 	r2d_free_draw_list();
 	r2d_free_batch();
-};
-
-r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
-{
-	// TODO: Texture formats
-	const size_t size = width*height*4;
-	// Get a free texture handle
-	r2d_texture_t *texture = r2d_get_texture_handle();
-	// Set the data
-	texture->w = width;
-	texture->h = height;
-	// Allocate and copy the pixel array
-	texture->pixels = malloc(size);
-	assert(texture->pixels != NULL);
-	memcpy(texture->pixels, pixels, size);
-	// Insert into the creation list
-	assert ((g_texture_list.create_count + 1) < MAX_TEXTURES);
-	g_texture_list.create[atomic_inc(&g_texture_list.create_count)] = texture;
-	return texture;
-};
-void r2d_free_texture(r2d_texture_t *texture)
-{
-	// Insert into the destroy list
-	assert ((g_texture_list.destroy_count + 1) < MAX_TEXTURES);
-	g_texture_list.create[atomic_inc(&g_texture_list.destroy_count)] = texture;
 };
 
 v2 r2d_screen_to_viewport(v2 screen)
@@ -507,6 +489,10 @@ static void r2d_flush_batch()
 	g_batch.current = 1 - g_batch.current;
 };
 
+static void r2d_init_textures()
+{
+	g_texture_list.mtx = (ticket_mtx_t){0};
+};
 static r2d_texture_t* r2d_get_texture_handle()
 {
 	r2d_texture_t *texture = NULL;
@@ -520,7 +506,7 @@ static r2d_texture_t* r2d_get_texture_handle()
 	} else {
 		// Nothing in the list, allocate a new one
 		assert ((g_texture_list.texture_count + 1) < MAX_TEXTURES);
-		const u32 index = atomic_inc(&g_texture_list.texture_count);
+		const u32 index = u32_atomic_inc(&g_texture_list.texture_count);
 		texture = g_texture_list.textures + index;
 	}
 	// Zero everything
@@ -532,53 +518,101 @@ static void r2d_free_texture_handle(r2d_texture_t *texture)
 	texture->next_free = g_texture_list.free_texture;
 	g_texture_list.free_texture = texture;
 }
+
+r2d_texture_t* r2d_alloc_texture(u32 width, u32 height, u8 *pixels)
+{
+	// TODO: Texture formats
+	const size_t size = width*height*4;
+	
+	r2d_texture_t *texture = NULL;
+	ticket_mtx_lock(&g_texture_list.mtx);
+	{
+		// Get a free texture handle
+		texture = r2d_get_texture_handle();
+		// Set the data
+		texture->w = width;
+		texture->h = height;
+		// Allocate and copy the pixel array
+		texture->pixels = malloc(size);
+		assert(texture->pixels != NULL);
+		memcpy(texture->pixels, pixels, size);
+		// Insert into the creation list
+		assert ((g_texture_list.create_count + 1) < MAX_TEXTURES);
+		g_texture_list.create[g_texture_list.create_count++] = texture;
+	}
+	ticket_mtx_unlock(&g_texture_list.mtx);
+	return texture;
+};
+void r2d_free_texture(r2d_texture_t *texture)
+{
+	ticket_mtx_lock(&g_texture_list.mtx);
+	{
+		// Insert into the destroy list
+		assert ((g_texture_list.destroy_count + 1) < MAX_TEXTURES);
+		g_texture_list.create[g_texture_list.destroy_count++] = texture;
+	}
+	ticket_mtx_unlock(&g_texture_list.mtx);
+};
+
 static void r2d_free_all_textures()
 {
-	for (u32 i = 0; i < g_texture_list.texture_count; i++)
+	ticket_mtx_lock(&g_texture_list.mtx);
 	{
-		// Free texture data
-		r2d_texture_t *texture = g_texture_list.textures + i;
-		if (texture->handle)
-			glDeleteTextures(1, &texture->handle);
-		if (texture->pixels)
-			free(texture->pixels);
+		for (u32 i = 0; i < g_texture_list.texture_count; i++)
+		{
+			// Free texture data
+			r2d_texture_t *texture = g_texture_list.textures + i;
+			if (texture->handle)
+				glDeleteTextures(1, &texture->handle);
+			if (texture->pixels)
+				free(texture->pixels);
+		}
+		g_texture_list.texture_count = 0;
 	}
-	g_texture_list.texture_count = 0;
+	ticket_mtx_unlock(&g_texture_list.mtx);
 };
 
 static void r2d_create_queued_textures()
 {
-	// Create every texture in the creation list
-	for (u32 i = 0; i < g_texture_list.create_count; i++)
+	ticket_mtx_lock(&g_texture_list.mtx);
 	{
-		r2d_texture_t *texture = g_texture_list.create[i];
+		// Create every texture in the creation list
+		for (u32 i = 0; i < g_texture_list.create_count; i++)
+		{
+			r2d_texture_t *texture = g_texture_list.create[i];
 
-		glGenTextures(1, &texture->handle);
+			glGenTextures(1, &texture->handle);
 
-		glBindTexture(GL_TEXTURE_2D, texture->handle);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexImage2D(GL_TEXTURE_2D, 
-			0, GL_RGBA, texture->w, texture->h, 
-			0, GL_RGBA, GL_UNSIGNED_BYTE, texture->pixels);
-		glBindTexture(GL_TEXTURE_2D, 0);
+			glBindTexture(GL_TEXTURE_2D, texture->handle);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexImage2D(GL_TEXTURE_2D, 
+				0, GL_RGBA, texture->w, texture->h, 
+				0, GL_RGBA, GL_UNSIGNED_BYTE, texture->pixels);
+			glBindTexture(GL_TEXTURE_2D, 0);
+		}
+		// Reset list
+		g_texture_list.create_count = 0;
 	}
-	// Reset list
-	g_texture_list.create_count = 0;
+	ticket_mtx_unlock(&g_texture_list.mtx);
 };
 static void r2d_destroy_queued_textures()
 {
-	for (u32 i = 0; i < g_texture_list.destroy_count; i++)
-	{
-		// Free texture data
-		r2d_texture_t *texture = g_texture_list.create[i];
-		glDeleteTextures(1, &texture->handle);
-		free(texture->pixels);
-		// Add to the free list
-		r2d_free_texture_handle(texture);
+	ticket_mtx_lock(&g_texture_list.mtx);
+	{	
+		for (u32 i = 0; i < g_texture_list.destroy_count; i++)
+		{
+			// Free texture data
+			r2d_texture_t *texture = g_texture_list.create[i];
+			glDeleteTextures(1, &texture->handle);
+			free(texture->pixels);
+			// Add to the free list
+			r2d_free_texture_handle(texture);
+		}
+		// Reset list
+		g_texture_list.destroy_count = 0;
 	}
-	// Reset list
-	g_texture_list.destroy_count = 0;
+	ticket_mtx_unlock(&g_texture_list.mtx);
 };
 
 static bool r2d_alloc_draw_list()

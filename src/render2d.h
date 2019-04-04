@@ -2,6 +2,7 @@
 #define RENDER_H
 
 #include <stdio.h>
+
 #include <GL\gl3w.h>
 
 #include "core.h"
